@@ -125,8 +125,14 @@ Things Reverb's behaviour makes worth knowing:
 - **Publishing is asynchronous.** A create with `publish` true comes back as a
   draft with the message "We are processing your request"; Reverb fetches the
   photos first and emails the seller if the publish fails. Read the listing
-  back later before deciding it did not publish.
-- A draft cannot be ended (422). A published listing cannot be deleted (406).
+  back before deciding it did not publish; in testing it was live a second
+  later.
+- A draft cannot be ended (422). A published listing cannot be deleted (400
+  "Only drafts can be deleted"). `end()` answers with an empty body.
+- An ended listing that never sold comes back with `publish` true, used
+  conditions included. A used listing that *sold* is locked for good.
+- `mine()` is a search index and trails a state change by a few seconds;
+  `find()` is always current.
 - Setting `inventory` to 0 ends a listing.
 - Only **Brand New**, **B-Stock** and **Mint (with inventory)** can hold more
   than one unit and relist themselves when stock returns
@@ -204,7 +210,7 @@ Every failure is an `Edos\ReverbMarketplace\Exceptions\ReverbException` with
 | `AuthenticationException` | 401. Bad token, wrong environment, or an OAuth-only operation |
 | `AuthorizationException`  | 403. Missing scope, or a feature the account does not have    |
 | `NotFoundException`       | 404                                                           |
-| `ConstraintException`     | 406. For example, deleting a published listing                |
+| `ConstraintException`     | 406                                                           |
 | `ValidationException`     | 400, 412, 422. `errors()` has the field breakdown             |
 | `RateLimitException`      | 429, after retries. `retryAfter()` when Reverb says           |
 | `ClientException`         | Any other 4xx                                                 |
