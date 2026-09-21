@@ -88,6 +88,12 @@ class Listings extends ApiResource
      * manual listing) and, on current accounts, multi-factor
      * authentication; without them Reverb answers 403 or keeps the draft.
      *
+     * Publishing is asynchronous. On production a create with publish =>
+     * true answers "We are processing your request and will send you an
+     * email if any errors are found" with the listing still a draft;
+     * Reverb fetches the photos first. Read the listing back later for its
+     * real state, and do not treat a draft in this response as a failure.
+     *
      * The response nests the listing under "listing", beside "message",
      * "errors" and "warnings".
      *

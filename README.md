@@ -122,6 +122,10 @@ Things Reverb's behaviour makes worth knowing:
   with billing set up and one listing made by hand, and current accounts also
   need multi-factor authentication; otherwise Reverb answers 403 or keeps the
   draft. Read the state back with `ListingState::fromListing($response)`.
+- **Publishing is asynchronous.** A create with `publish` true comes back as a
+  draft with the message "We are processing your request"; Reverb fetches the
+  photos first and emails the seller if the publish fails. Read the listing
+  back later before deciding it did not publish.
 - A draft cannot be ended (422). A published listing cannot be deleted (406).
 - Setting `inventory` to 0 ends a listing.
 - Only **Brand New**, **B-Stock** and **Mint (with inventory)** can hold more

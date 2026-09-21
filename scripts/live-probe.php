@@ -13,8 +13,10 @@
  *  - The "drafts" stage never sends publish=true, so nothing becomes public.
  *  - The "public" stage refuses to run without --allow-public. It puts one
  *    listing on the public site for about a minute: fictional make, a
- *    "DO NOT BUY" title, $9,999, offers off. It sleeps nowhere while the
- *    listing is live, and ends it as soon as the live checks are read.
+ *    "DO NOT BUY" title, $9,999, offers off. Publishing is asynchronous,
+ *    so it polls (up to --publish-wait seconds) for the draft to go live;
+ *    once live it sleeps nowhere and ends the listing as soon as the live
+ *    checks are read.
  *    An ended listing cannot be deleted, so each public run leaves one
  *    ended test listing in the seller's own (non-public) ended list.
  *    --condition=brand-new repeats the run for a condition that holds
@@ -36,13 +38,14 @@ use Faker\Factory;
 
 require __DIR__.'/../vendor/autoload.php';
 
-$options = getopt('', ['env:', 'stage:', 'allow-public', 'log:', 'condition:']);
+$options = getopt('', ['env:', 'stage:', 'allow-public', 'log:', 'condition:', 'publish-wait:']);
+$publishWait = (int) ($options['publish-wait'] ?? 120);
 $environment = $options['env'] ?? null;
 $stage = $options['stage'] ?? 'drafts';
 $token = getenv('REVERB_MARKETPLACE_TOKEN') ?: null;
 
 if (! in_array($environment, ['production', 'sandbox'], true) || $token === null) {
-    fwrite(STDERR, "Usage: REVERB_MARKETPLACE_TOKEN=... php scripts/live-probe.php --env=production|sandbox [--stage=drafts|public] [--allow-public] [--condition=good|brand-new] [--log=path]\n");
+    fwrite(STDERR, "Usage: REVERB_MARKETPLACE_TOKEN=... php scripts/live-probe.php --env=production|sandbox [--stage=drafts|public] [--allow-public] [--condition=good|brand-new] [--publish-wait=120] [--log=path]\n");
     exit(2);
 }
 
@@ -196,6 +199,22 @@ try {
         };
         $read = fn (string $id): array => ($listing = $client->listings()->find($id)) + ['__summary' => $describe($listing)];
 
+        // Poll until the listing leaves $from, or the wait runs out.
+        $awaitChange = function (string $id, string $from) use ($client, $publishWait): array {
+            $waited = 0;
+
+            while (true) {
+                $listing = $client->listings()->find($id);
+
+                if (ListingState::slugFromListing($listing) !== $from || $waited >= $publishWait) {
+                    return [$listing, $waited];
+                }
+
+                sleep(5);
+                $waited += 5;
+            }
+        };
+
         printf("Condition: %s (inventory sent: %d)\n\n", $condition->label(), $units);
 
         // P1. Create and publish in one call, photos included: Reverb will
@@ -221,10 +240,16 @@ try {
 
         $created[$id] = 'public';
 
-        $live = $step('P2. read back', fn (): array => $read($id));
+        // P2. Publishing is asynchronous on production: the create answers
+        // "We are processing your request" with the listing still a draft,
+        // and Reverb has to fetch the photos before it can publish. Wait
+        // for the state to move rather than reading it once.
+        [$live, $waited] = $awaitChange($id, 'draft');
 
-        if (ListingState::slugFromListing($live ?? []) !== 'live') {
-            throw new RuntimeException('The listing did not go live, so the live-only checks are skipped. See P1 for Reverb\'s reason.');
+        $step('P2. state after waiting', fn (): array => $live + ['__summary' => "after {$waited}s: ".$describe($live).' photos='.count($live['photos'] ?? [])]);
+
+        if (ListingState::slugFromListing($live) !== 'live') {
+            throw new RuntimeException("Still not live after {$waited}s. Reverb emails the seller when a publish fails; the reason will be there.");
         }
 
         printf("       public URL while live: %s\n", $live['_links']['web']['href'] ?? '?');
@@ -242,7 +267,8 @@ try {
         // P6. The question SyncReverbListing::confirmRevival() guards: does
         // a PUT bring an ended listing back?
         $step('P6a. revive: PUT publish=true', fn (): array => ($b = $client->listings()->update($id, ['publish' => true, 'inventory' => $units])) + ['__summary' => $describe($b)]);
-        $revived = $step('P6b. read back', fn (): array => $read($id));
+        [$revived, $revivalWait] = $awaitChange($id, 'ended');
+        $step('P6b. state after waiting', fn (): array => $revived + ['__summary' => "after {$revivalWait}s: ".$describe($revived)]);
 
         if (ListingState::slugFromListing($revived ?? []) === 'live') {
             // P7. Reverb documents inventory 0 as ending a listing.
