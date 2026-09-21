@@ -1,0 +1,61 @@
+{
+    "name": "edos-engineering/reverb-marketplace",
+    "description": "PHP and Laravel client for the Reverb.com marketplace API: listings, orders, shipping, offers, refunds, payouts and webhooks. Not related to Laravel Reverb (WebSockets).",
+    "keywords": [
+        "reverb",
+        "reverb.com",
+        "marketplace",
+        "music gear",
+        "ecommerce",
+        "api client",
+        "laravel"
+    ],
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jeremy Jacob Anderson"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/contracts": "^11.0|^12.0|^13.0",
+        "illuminate/http": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.23",
+        "laravel/pint": "^1.18",
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "phpunit/phpunit": "^11.0|^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Edos\\ReverbMarketplace\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Edos\\ReverbMarketplace\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "pint"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Edos\\ReverbMarketplace\\ReverbMarketplaceServiceProvider"
+            ],
+            "aliases": {
+                "ReverbMarketplace": "Edos\\ReverbMarketplace\\Facades\\ReverbMarketplace"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
