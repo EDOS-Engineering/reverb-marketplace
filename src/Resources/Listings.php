@@ -38,7 +38,8 @@ class Listings extends ApiResource
     /**
      * The seller's own listings. Reverb returns only live listings unless
      * a state is given; pass ['state' => 'all'] to include drafts and
-     * ended listings.
+     * ended listings. This is a search index and trails a change of state
+     * by a few seconds; find() is always current.
      *
      * @param  array<string, mixed>  $filters  e.g. sku, state, query, page, per_page
      */
@@ -90,16 +91,17 @@ class Listings extends ApiResource
      *
      * Publishing is asynchronous. On production a create with publish =>
      * true answers "We are processing your request and will send you an
-     * email if any errors are found" with the listing still a draft;
-     * Reverb fetches the photos first. Read the listing back later for its
-     * real state, and do not treat a draft in this response as a failure.
+     * email if any errors are found" with the listing still a draft, and
+     * the listing was live when read back a second later. Read the listing
+     * back for its real state; a draft in this response is not a failure.
      *
      * The response nests the listing under "listing", beside "message",
      * "errors" and "warnings".
      *
-     * A listing in a used condition reads back has_inventory false and
-     * inventory 0 as a draft whatever was sent: used items are one of a
-     * kind (see ListingCondition::supportsInventory()).
+     * A listing in a used condition always reads back has_inventory false,
+     * whatever was sent: used items are one of a kind (see
+     * ListingCondition::supportsInventory()). Its inventory reads 0 as a
+     * draft and 1 once live.
      *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -111,8 +113,13 @@ class Listings extends ApiResource
 
     /**
      * Update takes the same fields as create; send only what changed.
-     * Setting inventory to 0 ends the listing. Raising it above 0 relists
-     * only a Brand New, B-Stock or Mint (with inventory) listing.
+     * Setting inventory to 0 ends the listing (confirmed).
+     *
+     * An ended listing that never sold comes back with publish => true,
+     * at once, in a used condition too (confirmed). What Reverb's guide
+     * rules out is relisting a used listing that SOLD: that one is locked,
+     * and only Brand New, B-Stock and Mint (with inventory) relist when
+     * stock returns.
      *
      * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
@@ -131,7 +138,9 @@ class Listings extends ApiResource
     }
 
     /**
-     * End a live listing. A draft cannot be ended (422); delete it instead.
+     * End a live listing. A draft cannot be ended (422 "This listing is a
+     * draft"); delete it instead. The response body is empty, so read the
+     * listing back if the new state matters.
      *
      * @return array<string, mixed>
      */
@@ -143,8 +152,9 @@ class Listings extends ApiResource
     }
 
     /**
-     * Delete a draft. A listing that was ever published cannot be deleted
-     * and answers 406.
+     * Delete a draft. A listing that was ever published cannot be deleted:
+     * Reverb answers 400 "Only drafts can be deleted" (a
+     * ValidationException), not the 406 its error guide suggests.
      *
      * @return array<string, mixed>
      */

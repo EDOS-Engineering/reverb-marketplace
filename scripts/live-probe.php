@@ -66,7 +66,7 @@ $record = function (string $label, mixed $data) use ($log): void {
     }
 };
 
-$step = function (string $label, callable $run, ?string $expect = null) use (&$failures, $record): mixed {
+$step = function (string $label, callable $run, ?string $expect = null, bool $optional = false) use (&$failures, $record): mixed {
     try {
         $result = $run();
         $record($label, $result);
@@ -79,8 +79,8 @@ $step = function (string $label, callable $run, ?string $expect = null) use (&$f
     } catch (ReverbException $e) {
         $record($label, ['status' => $e->status(), 'body' => $e->body()]);
         $matched = $expect !== null && $e instanceof $expect;
-        $failures += $matched ? 0 : 1;
-        printf("[%s] %-46s %s %s\n", $matched ? 'ok  ' : 'FAIL', $label, (new ReflectionClass($e))->getShortName(), mb_substr($e->getMessage(), 0, 140));
+        $failures += ($matched || $optional) ? 0 : 1;
+        printf("[%s] %-46s %s %s\n", $matched ? 'ok  ' : ($optional ? 'skip' : 'FAIL'), $label, (new ReflectionClass($e))->getShortName(), mb_substr($e->getMessage(), 0, 140));
 
         return null;
     }
@@ -256,7 +256,9 @@ try {
 
         $step('P3. update price while live', fn (): array => ($b = $client->listings()->update($id, ['price' => Money::fromCents(999_800)])) + ['__summary' => $describe($b)]);
         $step('P4a. bump info', fn (): string => 'keys=['.implode(',', array_keys($client->bumps()->find($id))).']');
-        $step('P4b. direct offer info', fn (): string => json_encode(array_diff_key($client->directOffers()->find($id), ['_links' => 1])));
+        // Needs the read_offers scope and an account with Direct Offers, so
+        // a refusal here is information, not a failure of the probe.
+        $step('P4b. direct offer info', fn (): string => json_encode(array_diff_key($client->directOffers()->find($id), ['_links' => 1])), optional: true);
         $step('P4c. findBySku default state (live)', fn (): string => 'total='.$client->listings()->mine(['sku' => $payload['sku']])->total.' (1 expected)');
         $step('P4d. delete a published listing', fn (): array => $client->listings()->delete($id) + ['__summary' => 'DELETED?!'], ClientException::class);
 
@@ -310,12 +312,16 @@ try {
         }
     }
 
+    // The listing index trails a state change by a few seconds.
+    sleep(8);
+
     $leftovers = $client->listings()->allMine(['state' => 'all'])
+        ->reject(fn (array $l): bool => in_array(ListingState::slugFromListing($l), ['ended', 'sold', 'ordered'], true))
         ->filter(fn (array $l): bool => str_starts_with((string) ($l['sku'] ?? ''), 'RMTEST-'))
         ->map(fn (array $l): string => $l['id'].':'.(ListingState::slugFromListing($l) ?? '?'))
         ->values()->all();
 
-    printf("  RMTEST- listings left on the account: %s\n", $leftovers === [] ? 'none' : implode(', ', $leftovers));
+    printf("  RMTEST- listings still draft or live: %s\n", $leftovers === [] ? 'none' : implode(', ', $leftovers));
 }
 
 exit($failures === 0 ? 0 : 1);
