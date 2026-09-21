@@ -11,7 +11,14 @@
  *    all carrying the SKU prefix RMTEST- and a "TEST LISTING — DO NOT BUY"
  *    title with obviously fictional Faker data.
  *  - The "drafts" stage never sends publish=true, so nothing becomes public.
- *  - The "public" stage refuses to run without --allow-public.
+ *  - The "public" stage refuses to run without --allow-public. It puts one
+ *    listing on the public site for about a minute: fictional make, a
+ *    "DO NOT BUY" title, $9,999, offers off. It sleeps nowhere while the
+ *    listing is live, and ends it as soon as the live checks are read.
+ *    An ended listing cannot be deleted, so each public run leaves one
+ *    ended test listing in the seller's own (non-public) ended list.
+ *    --condition=brand-new repeats the run for a condition that holds
+ *    inventory; the default, good, is a one-of-a-kind used item.
  *  - Whatever happens, the finally block deletes every draft it created and
  *    ends every listing it published, then sweeps the account for RMTEST-
  *    leftovers and reports them.
@@ -29,13 +36,13 @@ use Faker\Factory;
 
 require __DIR__.'/../vendor/autoload.php';
 
-$options = getopt('', ['env:', 'stage:', 'allow-public', 'log:']);
+$options = getopt('', ['env:', 'stage:', 'allow-public', 'log:', 'condition:']);
 $environment = $options['env'] ?? null;
 $stage = $options['stage'] ?? 'drafts';
 $token = getenv('REVERB_MARKETPLACE_TOKEN') ?: null;
 
 if (! in_array($environment, ['production', 'sandbox'], true) || $token === null) {
-    fwrite(STDERR, "Usage: REVERB_MARKETPLACE_TOKEN=... php scripts/live-probe.php --env=production|sandbox [--stage=drafts|public] [--allow-public] [--log=path]\n");
+    fwrite(STDERR, "Usage: REVERB_MARKETPLACE_TOKEN=... php scripts/live-probe.php --env=production|sandbox [--stage=drafts|public] [--allow-public] [--condition=good|brand-new] [--log=path]\n");
     exit(2);
 }
 
@@ -78,7 +85,7 @@ $step = function (string $label, callable $run, ?string $expect = null) use (&$f
 
 $listingOf = fn (array $body): array => is_array($body['listing'] ?? null) ? $body['listing'] : $body;
 
-$fakePayload = function () use ($faker, $client): array {
+$fakePayload = function (array $overrides = []) use ($faker, $client): array {
     $category = collect($client->catalog()->flatCategories())
         ->first(fn (array $row): bool => strcasecmp((string) ($row['name'] ?? ''), 'Picks') === 0);
 
@@ -102,6 +109,7 @@ $fakePayload = function () use ($faker, $client): array {
         'offers_enabled' => false,
         'shipping' => ['local' => true, 'rates' => [['region_code' => 'US_CON', 'rate' => Money::fromCents(500)]]],
         'publish' => false,
+        ...$overrides,
     ], fn (mixed $value): bool => $value !== null);
 };
 
@@ -174,6 +182,76 @@ try {
         $step('8b. find after delete', fn (): array => $client->listings()->find($id) + ['__summary' => 'STILL THERE'], NotFoundException::class);
         $step('8c. findBySku after delete', fn (): string => 'found='.json_encode($client->listings()->findBySku($sku) !== null));
     }
+
+    if ($stage === 'public') {
+        $condition = ListingCondition::fromSlug($options['condition'] ?? 'good') ?? ListingCondition::Good;
+        $units = $condition->supportsInventory() ? 2 : 1;
+
+        $describe = function (array $body) use ($listingOf): string {
+            $listing = $listingOf($body);
+
+            return sprintf('state=%s inventory=%s has_inventory=%s price=%s',
+                ListingState::slugFromListing($body) ?? '?', json_encode($listing['inventory'] ?? null),
+                json_encode($listing['has_inventory'] ?? null), $listing['price']['amount'] ?? '?');
+        };
+        $read = fn (string $id): array => ($listing = $client->listings()->find($id)) + ['__summary' => $describe($listing)];
+
+        printf("Condition: %s (inventory sent: %d)\n\n", $condition->label(), $units);
+
+        // P1. Create and publish in one call, photos included: Reverb will
+        // not publish a listing without one.
+        $payload = $fakePayload([
+            'condition' => $condition->toPayload(),
+            'inventory' => $units,
+            'photos' => ['https://placehold.co/1200x900/png?text=TEST+LISTING+DO+NOT+BUY'],
+            'publish' => true,
+        ]);
+        $body = $step('P1. create with publish=true', function () use ($client, $payload, $describe, $listingOf): array {
+            $body = $client->listings()->create($payload);
+
+            return $body + ['__summary' => 'id='.($listingOf($body)['id'] ?? '?').' '.$describe($body)
+                .' message='.json_encode($body['message'] ?? null).' errors='.json_encode($body['errors'] ?? null).' warnings='.json_encode($body['warnings'] ?? null)];
+        });
+
+        $id = $body ? (string) ($listingOf($body)['id'] ?? '') : '';
+
+        if ($id === '') {
+            throw new RuntimeException('No listing id came back; nothing was created.');
+        }
+
+        $created[$id] = 'public';
+
+        $live = $step('P2. read back', fn (): array => $read($id));
+
+        if (ListingState::slugFromListing($live ?? []) !== 'live') {
+            throw new RuntimeException('The listing did not go live, so the live-only checks are skipped. See P1 for Reverb\'s reason.');
+        }
+
+        printf("       public URL while live: %s\n", $live['_links']['web']['href'] ?? '?');
+
+        $step('P3. update price while live', fn (): array => ($b = $client->listings()->update($id, ['price' => Money::fromCents(999_800)])) + ['__summary' => $describe($b)]);
+        $step('P4a. bump info', fn (): string => 'keys=['.implode(',', array_keys($client->bumps()->find($id))).']');
+        $step('P4b. direct offer info', fn (): string => json_encode(array_diff_key($client->directOffers()->find($id), ['_links' => 1])));
+        $step('P4c. findBySku default state (live)', fn (): string => 'total='.$client->listings()->mine(['sku' => $payload['sku']])->total.' (1 expected)');
+        $step('P4d. delete a published listing', fn (): array => $client->listings()->delete($id) + ['__summary' => 'DELETED?!'], ClientException::class);
+
+        // P5. End it. From here on nothing is public unless a revive works.
+        $step('P5a. end (not_sold)', fn (): array => ($b = $client->listings()->end($id)) + ['__summary' => $describe($b)]);
+        $step('P5b. read back', fn (): array => $read($id));
+
+        // P6. The question SyncReverbListing::confirmRevival() guards: does
+        // a PUT bring an ended listing back?
+        $step('P6a. revive: PUT publish=true', fn (): array => ($b = $client->listings()->update($id, ['publish' => true, 'inventory' => $units])) + ['__summary' => $describe($b)]);
+        $revived = $step('P6b. read back', fn (): array => $read($id));
+
+        if (ListingState::slugFromListing($revived ?? []) === 'live') {
+            // P7. Reverb documents inventory 0 as ending a listing.
+            $step('P7a. PUT inventory=0', fn (): array => ($b = $client->listings()->update($id, ['inventory' => 0])) + ['__summary' => $describe($b)]);
+            $step('P7b. read back', fn (): array => $read($id));
+        } else {
+            echo "       P7 skipped: the listing did not revive, so there is no live listing to zero.\n";
+        }
+    }
 } catch (Throwable $e) {
     $failures++;
     printf("\nABORTED: %s: %s\n", $e::class, $e->getMessage());
@@ -185,6 +263,14 @@ try {
             $state = ListingState::slugFromListing($client->listings()->find($id));
         } catch (ReverbException) {
             printf("  %s already gone\n", $id);
+
+            continue;
+        }
+
+        if (! in_array($state, ['draft', 'live'], true)) {
+            // Already off the public site. A listing that was ever
+            // published cannot be deleted, so this is as clean as it gets.
+            printf("  %s (%s) not public; left as is\n", $id, $state);
 
             continue;
         }
