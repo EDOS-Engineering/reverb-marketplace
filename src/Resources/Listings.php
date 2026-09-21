@@ -104,6 +104,9 @@ class Listings extends ApiResource
      * indefinitely, with the warning "A valid UPC/EAN must be entered..."
      * (confirmed). No error is raised and no email was sent.
      *
+     * A Brand New listing keeps the has_inventory and inventory it was
+     * sent, as a draft and live (confirmed with inventory 2).
+     *
      * A listing in a used condition always reads back has_inventory false,
      * whatever was sent: used items are one of a kind (see
      * ListingCondition::supportsInventory()). Its inventory reads 0 as a
@@ -119,7 +122,10 @@ class Listings extends ApiResource
 
     /**
      * Update takes the same fields as create; send only what changed.
-     * Setting inventory to 0 ends the listing (confirmed).
+     * Setting inventory to 0 takes the listing off sale (confirmed): a
+     * used listing becomes "ended", and one that holds inventory (Brand
+     * New with has_inventory) becomes "sold". An ended listing that holds
+     * inventory keeps its count; a used one reads 0.
      *
      * An ended listing that never sold comes back with publish => true,
      * at once, in a used condition too (confirmed). What Reverb's guide

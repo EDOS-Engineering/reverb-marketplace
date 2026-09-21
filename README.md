@@ -136,7 +136,8 @@ Things Reverb's behaviour makes worth knowing:
   conditions included. A used listing that *sold* is locked for good.
 - `mine()` is a search index and trails a state change by a few seconds;
   `find()` is always current.
-- Setting `inventory` to 0 ends a listing.
+- Setting `inventory` to 0 takes a listing off sale: a used listing becomes
+  `ended`, one that holds inventory becomes `sold`.
 - Only **Brand New**, **B-Stock** and **Mint (with inventory)** can hold more
   than one unit and relist themselves when stock returns
   (`ListingCondition::supportsInventory()`). Any other condition is a
