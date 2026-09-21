@@ -19,6 +19,10 @@
  *    checks are read.
  *    An ended listing cannot be deleted, so each public run leaves one
  *    ended test listing in the seller's own (non-public) ended list.
+ *  - The "relist" stage works on one earlier test listing (--listing=id)
+ *    that has sold out, and refuses any listing whose SKU does not start
+ *    RMTEST-. It asks what ending a sold listing answers, and whether
+ *    restocking relists it; it puts the listing back to inventory 0.
  *    --condition=brand-new repeats the run for a condition that holds
  *    inventory; the default, good, is a one-of-a-kind used item.
  *  - Whatever happens, the finally block deletes every draft it created and
@@ -38,18 +42,18 @@ use Faker\Factory;
 
 require __DIR__.'/../vendor/autoload.php';
 
-$options = getopt('', ['env:', 'stage:', 'allow-public', 'log:', 'condition:', 'publish-wait:']);
+$options = getopt('', ['env:', 'stage:', 'allow-public', 'log:', 'condition:', 'publish-wait:', 'listing:']);
 $publishWait = (int) ($options['publish-wait'] ?? 120);
 $environment = $options['env'] ?? null;
 $stage = $options['stage'] ?? 'drafts';
 $token = getenv('REVERB_MARKETPLACE_TOKEN') ?: null;
 
 if (! in_array($environment, ['production', 'sandbox'], true) || $token === null) {
-    fwrite(STDERR, "Usage: REVERB_MARKETPLACE_TOKEN=... php scripts/live-probe.php --env=production|sandbox [--stage=drafts|public] [--allow-public] [--condition=good|brand-new] [--publish-wait=120] [--log=path]\n");
+    fwrite(STDERR, "Usage: REVERB_MARKETPLACE_TOKEN=... php scripts/live-probe.php --env=production|sandbox [--stage=drafts|public|relist] [--allow-public] [--listing=id] [--condition=good|brand-new] [--publish-wait=120] [--log=path]\n");
     exit(2);
 }
 
-if ($stage === 'public' && ! isset($options['allow-public'])) {
+if (in_array($stage, ['public', 'relist'], true) && ! isset($options['allow-public'])) {
     fwrite(STDERR, "The public stage publishes a real, buyable listing. Re-run with --allow-public to confirm.\n");
     exit(2);
 }
@@ -282,6 +286,35 @@ try {
         } else {
             echo "       P7 skipped: the listing did not revive, so there is no live listing to zero.\n";
         }
+    }
+
+    if ($stage === 'relist') {
+        $id = (string) ($options['listing'] ?? '');
+        $target = $id === '' ? [] : $client->listings()->find($id);
+
+        if (! str_starts_with((string) ($target['sku'] ?? ''), 'RMTEST-')) {
+            throw new RuntimeException('--listing must name a listing this probe created (SKU starting RMTEST-).');
+        }
+
+        $created[$id] = 'public';
+
+        $describe = fn (array $body): string => sprintf('state=%s inventory=%s has_inventory=%s',
+            ListingState::slugFromListing($body) ?? '?', json_encode($listingOf($body)['inventory'] ?? null), json_encode($listingOf($body)['has_inventory'] ?? null));
+        $read = fn (): array => ($listing = $client->listings()->find($id)) + ['__summary' => $describe($listing)];
+
+        $step('R1. starting state', $read);
+
+        // What the application does after Reverb sells the last unit: its
+        // stock hits zero and it ends the listing, which is already sold.
+        $step('R2. end a sold-out listing', fn (): array => $client->listings()->end($id) + ['__summary' => 'accepted'], optional: true);
+        $step('R3. read back', $read);
+
+        // Reverb's guide: a new-condition listing relists when stock returns.
+        $step('R4. restock: PUT inventory=1 publish=true', fn (): array => ($b = $client->listings()->update($id, ['inventory' => 1, 'publish' => true])) + ['__summary' => $describe($b)], optional: true);
+        $step('R5. read back', $read);
+
+        $step('R6. sell out again: PUT inventory=0', fn (): array => ($b = $client->listings()->update($id, ['inventory' => 0])) + ['__summary' => $describe($b)], optional: true);
+        $step('R7. read back', $read);
     }
 } catch (Throwable $e) {
     $failures++;
