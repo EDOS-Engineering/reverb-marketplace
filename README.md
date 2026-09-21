@@ -13,7 +13,7 @@ Not affiliated with or endorsed by Reverb.
 
 ## Requirements
 
-PHP 8.2+. Laravel 11, 12 or 13 for the service provider, facade, webhook route
+PHP 8.2+. Laravel 12 or 13 for the service provider, facade, webhook route
 and Artisan command; the client itself also runs without Laravel.
 
 ## Install
