@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 jobs:
   tests:
@@ -27,3 +28,14 @@ jobs:
       - run: composer update --prefer-dist --no-interaction --no-progress
       - run: vendor/bin/pint --test
       - run: vendor/bin/phpunit
+
+  # The one check the branch ruleset requires. A matrix reports a check
+  # per cell, and their names change with the matrix, so the ruleset
+  # points here instead: green only when every cell is.
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [tests]
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.tests.result }}" = "success"
