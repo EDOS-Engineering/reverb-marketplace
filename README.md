@@ -127,6 +127,9 @@ Things Reverb's behaviour makes worth knowing:
   photos first and emails the seller if the publish fails. Read the listing
   back before deciding it did not publish; in testing it was live a second
   later.
+- **Read `warnings`.** Reverb accepts listings it will not publish and explains
+  only there. A Brand New item needs a valid `upc` or `upc_does_not_apply`
+  true; without one it stays a draft indefinitely, with no error and no email.
 - A draft cannot be ended (422). A published listing cannot be deleted (400
   "Only drafts can be deleted"). `end()` answers with an empty body.
 - An ended listing that never sold comes back with `publish` true, used

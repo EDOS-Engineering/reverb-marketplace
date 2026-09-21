@@ -98,6 +98,12 @@ class Listings extends ApiResource
      * The response nests the listing under "listing", beside "message",
      * "errors" and "warnings".
      *
+     * Read "warnings" on every create and update. Reverb accepts a listing
+     * it will not publish and says why only there: a Brand New item with
+     * neither a valid upc nor upc_does_not_apply => true stays a draft
+     * indefinitely, with the warning "A valid UPC/EAN must be entered..."
+     * (confirmed). No error is raised and no email was sent.
+     *
      * A listing in a used condition always reads back has_inventory false,
      * whatever was sent: used items are one of a kind (see
      * ListingCondition::supportsInventory()). Its inventory reads 0 as a

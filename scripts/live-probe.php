@@ -222,6 +222,9 @@ try {
         $payload = $fakePayload([
             'condition' => $condition->toPayload(),
             'inventory' => $units,
+            // Reverb will not publish a Brand New item without a valid UPC or
+            // this flag; it says so only in "warnings" and leaves a draft.
+            'upc_does_not_apply' => $condition === ListingCondition::BrandNew ? true : null,
             'photos' => ['https://placehold.co/1200x900/png?text=TEST+LISTING+DO+NOT+BUY'],
             'publish' => true,
         ]);
