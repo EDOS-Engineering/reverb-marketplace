@@ -208,6 +208,60 @@ class ClientTest extends TestCase
         }
     }
 
+    /**
+     * A write that never got an answer may have been applied. Repeating
+     * it can create a second listing or send a message twice, so it is
+     * left to the caller, who can look the resource up first.
+     */
+    #[DataProvider('writes')]
+    public function test_a_connection_failure_on_a_write_is_not_retried(string $method, callable $write): void
+    {
+        Http::fake(['*' => Http::failedConnection('Operation timed out')]);
+
+        try {
+            $write($this->client());
+            $this->fail("Expected a TransportException from {$method}.");
+        } catch (TransportException) {
+            Http::assertSentCount(1);
+        }
+    }
+
+    /**
+     * @return array<string, array{string, callable(ReverbClient): mixed}>
+     */
+    public static function writes(): array
+    {
+        return [
+            'POST' => ['POST', fn (ReverbClient $client) => $client->listings()->create(['title' => 'Strat'])],
+            'PUT' => ['PUT', fn (ReverbClient $client) => $client->listings()->update('123', ['price' => '1'])],
+            'DELETE' => ['DELETE', fn (ReverbClient $client) => $client->listings()->delete('123')],
+        ];
+    }
+
+    public function test_a_connection_failure_on_a_read_is_retried_and_then_succeeds(): void
+    {
+        Http::fakeSequence()
+            ->pushFailedConnection('Operation timed out')
+            ->push(['email' => 'seller@example.com']);
+
+        $this->assertSame('seller@example.com', $this->client()->account()->get()['email']);
+        Http::assertSentCount(2);
+    }
+
+    /**
+     * A 429 is a refusal: Reverb did not act on the request, so repeating
+     * it is safe for a write too.
+     */
+    public function test_a_rate_limited_write_is_retried_and_then_succeeds(): void
+    {
+        Http::fakeSequence()
+            ->push(['message' => 'Slow down.'], 429)
+            ->push(['listing' => ['id' => 1]], 201);
+
+        $this->assertSame(1, $this->client()->listings()->create(['title' => 'Strat'])['listing']['id']);
+        Http::assertSentCount(2);
+    }
+
     public function test_a_connection_failure_becomes_a_transport_exception(): void
     {
         Http::fake(fn () => throw new ConnectionException('Connection timed out'));
