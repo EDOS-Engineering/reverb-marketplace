@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 - 2026-10-02
 
 - A write is no longer retried after a connection failure. A POST, PUT or
   DELETE that timed out may have been applied, and the in-place retry could
