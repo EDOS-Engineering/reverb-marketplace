@@ -356,7 +356,7 @@ class ReverbClient
         $options = $payload === [] ? [] : ['json' => $payload];
 
         try {
-            $response = $this->pending()->send($method, $url, $options);
+            $response = $this->pending($method)->send($method, $url, $options);
         } catch (ConnectionException $e) {
             throw new TransportException("Could not reach Reverb ({$method} {$url}): {$e->getMessage()}", $e);
         } catch (RequestException $e) {
@@ -367,7 +367,15 @@ class ReverbClient
         return $this->decode($response);
     }
 
-    protected function pending(): PendingRequest
+    /**
+     * A 429 is retried for every method: Reverb refused the request and
+     * acted on nothing. A connection failure is retried only for a GET,
+     * because a write that never got an answer may still have been
+     * applied, and repeating it can create a second listing or send a
+     * message twice. That decision belongs to the caller, who can look
+     * the resource up first (see TransportException).
+     */
+    protected function pending(string $method = 'GET'): PendingRequest
     {
         $pending = $this->http
             ->withHeaders(array_filter([
@@ -386,12 +394,13 @@ class ReverbClient
         }
 
         $retries = (int) ($this->config['retries'] ?? 2);
+        $isRead = in_array(strtoupper($method), ['GET', 'HEAD'], true);
 
         if ($retries > 0) {
             $pending = $pending->retry(
                 $retries + 1,
                 (int) ($this->config['retry_delay_ms'] ?? 500),
-                fn (Throwable $e): bool => $e instanceof ConnectionException
+                fn (Throwable $e): bool => ($e instanceof ConnectionException && $isRead)
                     || ($e instanceof RequestException && $e->response->status() === 429),
                 throw: false,
             );

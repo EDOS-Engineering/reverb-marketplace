@@ -221,9 +221,11 @@ Every failure is an `Edos\ReverbMarketplace\Exceptions\ReverbException` with
 | `ServerException`         | 5xx                                                           |
 | `TransportException`      | No response at all                                            |
 
-Connection failures and 429s are retried (`retries`, `retry_delay_ms`). A 5xx
-is never retried, and a `TransportException` on a write is ambiguous: the
-create may have happened. Look the listing up by SKU before repeating it.
+A 429 is retried for every request, and a connection failure for a GET only
+(`retries`, `retry_delay_ms`). A 5xx is never retried. A write that fails to
+connect is not retried either, because it is ambiguous: the create may have
+happened. It surfaces as a `TransportException`; look the listing up by SKU
+before repeating it.
 
 Reverb's limits are 2,000 reads or 600 writes a minute (10,000 / 3,000 per ten
 minutes). Queue bulk syncs rather than looping.

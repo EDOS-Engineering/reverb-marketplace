@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A write is no longer retried after a connection failure. A POST, PUT or
+  DELETE that timed out may have been applied, and the in-place retry could
+  create a second listing for the same instrument. It now surfaces at once
+  as a `TransportException` for the caller to resolve. GETs still retry
+  connection failures, and every method still retries a 429.
+
 ## 0.1.1 - 2026-09-21
 
 No change to the client's behaviour. Documentation corrected against a live

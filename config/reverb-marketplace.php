@@ -62,8 +62,9 @@ return [
     | Timeouts and retries
     |--------------------------------------------------------------------------
     |
-    | Retries cover connection failures and 429 rate-limit responses only.
-    | A 5xx on a write is never retried: a create that timed out may have
+    | Retries cover 429 rate-limit responses, for every method, and
+    | connection failures on a GET. A write is never retried after a
+    | connection failure or a 5xx: a create that timed out may have
     | succeeded, and repeating it would list the same instrument twice.
     |
     */
